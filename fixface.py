@@ -4,13 +4,28 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import argparse
 
 # Mediapipe Initialisierung
 mp_face_detection = mp.solutions.face_detection
 mp_drawing = mp.solutions.drawing_utils
 
 # Video öffnen
-cap = cv2.VideoCapture('input-800.mp4')
+parser = argparse.ArgumentParser(description="Ein Beispiel-Skript zur Demonstration der Kommandozeilenparameter.")
+parser.add_argument('--input', type=str, required=True, help="Der Eingabepfad zur Datei")
+parser.add_argument('--output', type=str, required=True, help="Der Ausgabepfad zur Datei")
+parser.add_argument('--verbose', action='store_true', help="Gibt zusätzliche Informationen aus")
+    
+args = parser.parse_args()
+    
+if args.verbose:
+    print(f"Verarbeitung der Datei: {args.input}")
+    
+# Hier kannst du deinen Code zur Verarbeitung der Datei hinzufügen
+print(f"Eingabepfad: {args.input}")
+print(f"Ausgabepfad: {args.output}")
+
+cap = cv2.VideoCapture(args.input)
 
 # Zielposition für das Gesicht (z.B. die Mitte des Bildschirms)
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -20,7 +35,7 @@ target_x, target_y = frame_width // 2, frame_height // 2  # Zielposition in der 
 
 # VideoWriter initialisieren (für MP4-Ausgabe)
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec für MP4
-out = cv2.VideoWriter('output.mp4', fourcc, fps, (frame_width, frame_height))
+out = cv2.VideoWriter(args.output, fourcc, fps, (frame_width, frame_height))
 
 # Glättungsfaktoren initialisieren
 smooth_dx, smooth_dy = 0, 0

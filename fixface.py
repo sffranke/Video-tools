@@ -8,50 +8,40 @@ import argparse
 
 # Mediapipe Initialisierung
 mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
 
 # Video öffnen
-parser = argparse.ArgumentParser(description="Ein Beispiel-Skript zur Demonstration der Kommandozeilenparameter.")
+parser = argparse.ArgumentParser()
 parser.add_argument('--input', type=str, required=True, help="Der Eingabepfad zur Datei")
-parser.add_argument('--output', type=str, required=True, help="Der Ausgabepfad zur Datei")
-parser.add_argument('--verbose', action='store_true', help="Gibt zusätzliche Informationen aus")
-    
 args = parser.parse_args()
-    
-if args.verbose:
-    print(f"Verarbeitung der Datei: {args.input}")
-    
-# Hier kannst du deinen Code zur Verarbeitung der Datei hinzufügen
+
 print(f"Eingabepfad: {args.input}")
-print(f"Ausgabepfad: {args.output}")
+print(f"Ausgabepfad: {'centered_' + args.input}")
 
 cap = cv2.VideoCapture(args.input)
 
-# Zielposition für das Gesicht (z.B. die Mitte des Bildschirms)
+# Zielposition für das Gesicht (Mitte des Bildschirms)
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fps = cap.get(cv2.CAP_PROP_FPS)  # Frame rate des Videos
-target_x, target_y = frame_width // 2, frame_height // 2  # Zielposition in der Mitte des Bildschirms
+target_x, target_y = frame_width // 2, frame_height // 2
 
 # VideoWriter initialisieren (für MP4-Ausgabe)
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec für MP4
-out = cv2.VideoWriter(args.output, fourcc, fps, (frame_width, frame_height))
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+out = cv2.VideoWriter('centered_' + args.input, fourcc, fps, (frame_width, frame_height))
 
 # Glättungsfaktoren initialisieren
 smooth_dx, smooth_dy = 0, 0
-alpha = 0.2  # Glättungsfaktor (zwischen 0 und 1; kleiner bedeutet mehr Glättung)
+alpha = 0.25  # Erhöhter Glättungsfaktor
 min_movement_threshold = 5  # Minimaler Bewegungsschwellenwert, um kleine Verschiebungen zu ignorieren
-max_shift_per_frame = 303    # Maximale Bewegung pro Frame, um abrupte Bewegungen zu vermeiden
-#stabilization_reset_interval = 300  # Nach dieser Anzahl von Frames wird der Versatz hart zurückgesetzt
+max_shift_per_frame = 150  # Begrenze die maximale Bewegung pro Frame
 
-# Frame-Zähler für das Zurücksetzen
-frame_counter = 0
+# Puffer für nicht erkannte Gesichter
+last_known_position = None
+frames_without_detection = 0
+max_frames_without_detection = 10  # Toleranz für fehlende Erkennung
 
 # Mediapipe Face Detection initialisieren
-with mp_face_detection.FaceDetection(
-        model_selection=1, min_detection_confidence=0.5) as face_detection:
-
-    first_face_detected = False  # Flag, ob das erste Gesicht erkannt wurde
+with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.6) as face_detection:
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -64,18 +54,17 @@ with mp_face_detection.FaceDetection(
         # Gesichtserkennung
         results = face_detection.process(image_rgb)
 
-        # Wenn ein Gesicht erkannt wurde
         if results.detections:
+            frames_without_detection = 0  # Gesicht erkannt, Zähler zurücksetzen
+
             for detection in results.detections:
                 bboxC = detection.location_data.relative_bounding_box
                 ih, iw, _ = frame.shape
                 x_center = int((bboxC.xmin + bboxC.width / 2) * iw)
                 y_center = int((bboxC.ymin + bboxC.height / 2) * ih)
 
-                # Wenn das erste Gesicht erkannt wurde, speichere seine Position
-                if not first_face_detected:
-                    first_face_detected = True
-                    print(f"Erstes Gesicht erkannt bei: ({x_center}, {y_center})")
+                # Speichere die letzte bekannte Position
+                last_known_position = (x_center, y_center)
 
                 # Berechne den Versatz, um das Gesicht in der Mitte des Bildes zu halten
                 dx = target_x - x_center
@@ -83,7 +72,6 @@ with mp_face_detection.FaceDetection(
 
                 # Nur verschieben, wenn die Bewegung größer als der Schwellenwert ist
                 if abs(dx) > min_movement_threshold or abs(dy) > min_movement_threshold:
-                    # Glättung der Bewegung durch einen gleitenden Durchschnitt
                     smooth_dx = int(alpha * dx + (1 - alpha) * smooth_dx)
                     smooth_dy = int(alpha * dy + (1 - alpha) * smooth_dy)
 
@@ -91,26 +79,36 @@ with mp_face_detection.FaceDetection(
                     smooth_dx = np.clip(smooth_dx, -max_shift_per_frame, max_shift_per_frame)
                     smooth_dy = np.clip(smooth_dy, -max_shift_per_frame, max_shift_per_frame)
 
-                    # Verschiebe das Bild, um das Gesicht zu zentrieren
-                    M = np.float32([[1, 0, smooth_dx], [0, 1, smooth_dy]])
-                    frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
+                # Verschiebe das Bild, um das Gesicht zu zentrieren
+                M = np.float32([[1, 0, smooth_dx], [0, 1, smooth_dy]])
+                frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
 
                 break  # Nur das erste erkannte Gesicht verwenden
+        else:
+            frames_without_detection += 1
 
-        # Frame-Zähler für das Zurücksetzen
-        '''
-        frame_counter += 1
-        if frame_counter % stabilization_reset_interval == 0:
-            # Harte Stabilisierung nach einer bestimmten Anzahl Frames
-            print("Harte Stabilisierung. Setze Versatz zurück.")
-            smooth_dx, smooth_dy = 0, 0
-        '''
+            # Wenn für einige Frames kein Gesicht erkannt wurde, verwende die letzte bekannte Position
+            if last_known_position and frames_without_detection <= max_frames_without_detection:
+                dx = target_x - last_known_position[0]
+                dy = target_y - last_known_position[1]
+
+                smooth_dx = int(alpha * dx + (1 - alpha) * smooth_dx)
+                smooth_dy = int(alpha * dy + (1 - alpha) * smooth_dy)
+
+                # Begrenze die maximale Bewegung pro Frame
+                smooth_dx = np.clip(smooth_dx, -max_shift_per_frame, max_shift_per_frame)
+                smooth_dy = np.clip(smooth_dy, -max_shift_per_frame, max_shift_per_frame)
+
+                # Verschiebe das Bild
+                M = np.float32([[1, 0, smooth_dx], [0, 1, smooth_dy]])
+                frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
+
         # Schreibe den Frame in die Ausgabedatei
         out.write(frame)
 
         # Zeige das stabilisierte Video an (optional)
         cv2.imshow('Stabilized Video', frame)
-        
+
         if cv2.waitKey(5) & 0xFF == 27:  # Beendet mit ESC
             break
 

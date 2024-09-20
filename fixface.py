@@ -1,6 +1,5 @@
 ### keeps the face in a move at a fixed point
 ### ffmpeg -i input.mp4 -b:v 800k -bufsize 800k -maxrate 800k -b:a 128k output.mp4
-
 import cv2
 import mediapipe as mp
 import numpy as np
